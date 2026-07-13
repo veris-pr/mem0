@@ -54,6 +54,8 @@ export function setupAutoCapture(
     const addParams = resolveAddParams("project", scopeCtx);
 
     try {
+      // Auto-captured memories are passive (not agent-curated), so they carry no
+      // category tags -- only memories the agent deliberately saves get [key:val] badges.
       await mem0.add(conversation, {
         ...addParams,
         customCategories: DEFAULT_CUSTOM_CATEGORIES,

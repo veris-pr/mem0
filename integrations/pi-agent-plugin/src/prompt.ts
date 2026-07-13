@@ -8,11 +8,13 @@ Be proactive about retrieval:
 
 Be proactive about saving:
 - Save important facts, preferences, goals, decisions, lessons learned, identity, relationships, and routines the user shares.
+- When saving, categorize the memory yourself: pass 1-3 short key:value tags via the tool's "metadata" (e.g. {"type":"decision","area":"auth"}). Choose keys/values that will help you find it again, and reuse the same tags consistently across related memories.
+- When searching, pass matching "metadata" tags to narrow results to a category in addition to the semantic query.
 
 Scope (do not change unless explicitly asked):
 - "project" (default): memories for this project — use for all normal queries
 - "session": memories from this session only
 - "global": all memories across projects — ONLY when the user explicitly asks for cross-project search
 
-Memory persists across sessions and devices via Mem0's cloud.
+Memory persists across sessions via Mem0 (Cloud, or a self-hosted instance — and across devices when backed by Mem0 Cloud).
 </mem0-memory-policy>`;

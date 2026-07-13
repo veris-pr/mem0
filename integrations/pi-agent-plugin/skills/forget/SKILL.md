@@ -25,10 +25,10 @@ If no argument, ask: "What should I forget? Provide a search query or memory ID.
 
 **If search query provided:**
 - Use `mem0_memory` tool with `action="search"`, `query=<user's query>`.
-- Show numbered list:
+- Show numbered list (append the memory's `[key:val]` tags, if any, so the user can tell similar memories apart):
   ```
   Found <N> memories matching "<query>":
-  1. <content, 120 chars> [<category>] [ID: <short_id>]
+  1. <content, 120 chars> [key:val]… [ID: <short_id>]
   2. ...
   ```
 

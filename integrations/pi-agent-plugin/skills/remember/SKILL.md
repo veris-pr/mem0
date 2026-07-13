@@ -17,7 +17,7 @@ If no text was provided, ask: "What should I remember?"
 
 ### Step 2: Classify the memory
 
-Based on the content, pick the best category:
+Based on the content, pick the best category value:
 
 | Content signal | Category |
 |---|---|
@@ -33,18 +33,19 @@ Based on the content, pick the best category:
 | setup, tools, config, environment | `technical` |
 | anything else | `lessons` |
 
+This table is a starting point — if a more specific value fits the content, use it, but reuse values consistently so they stay useful for filtering later.
+
 ### Step 3: Store
 
 Use the `mem0_memory` tool with:
 - `action="add"`
-- `content="<the user's text>"`
-
-The `/mem0-remember` command stores verbatim — no inference. This is already handled by the command.
+- `content="<the user's text>"` (stored verbatim — no inference)
+- `metadata={"category": "<chosen category>"}` — this is what makes the classification stick and show up as a `[category:<value>]` badge. Add extra `key:value` tags too if they'd help you find it later (e.g. `"area":"auth"`).
 
 ### Step 4: Confirm
 
 ```
-Remembered as <category>: "<content, first 80 chars>"
+Remembered [category:<chosen>]: "<content, first 80 chars>"
 ```
 
 Append `...` only if content was truncated (longer than 80 chars).

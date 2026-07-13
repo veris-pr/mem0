@@ -13,7 +13,7 @@ export { registerMemoryTool, buildToolExecute } from "./memory/tools.ts";
 export { createMemoryClient, SelfHostedMemoryClient } from "./memory/client.ts";
 export type { MemoryClientLike } from "./memory/client.ts";
 export { detectAppId, detectRunId, resolveSearchFilters, resolveAddParams } from "./memory/scoping.ts";
-export { formatAge, formatMemoryCompact, formatMemoryList, groupByCategory } from "./memory/formatting.ts";
+export { formatAge, formatMemoryCompact, formatMemoryList, formatMetadataBadges } from "./memory/formatting.ts";
 
 export { setupAutoCapture, extractConversation } from "./capture/index.ts";
 

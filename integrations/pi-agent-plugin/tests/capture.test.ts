@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { extractConversation } from "../src/capture/index.ts";
+import { describe, it, expect, vi } from "vitest";
+import { extractConversation, setupAutoCapture } from "../src/capture/index.ts";
 
 describe("extractConversation", () => {
   it("extracts user and assistant text messages", () => {
@@ -58,5 +58,47 @@ describe("extractConversation", () => {
 
   it("returns empty array for empty input", () => {
     expect(extractConversation([])).toEqual([]);
+  });
+});
+
+describe("setupAutoCapture", () => {
+  const buildPi = (handlers: Record<string, (...a: any[]) => any>) =>
+    ({
+      on: (evt: string, fn: (...a: any[]) => any) => {
+        handlers[evt] = fn;
+      },
+    }) as any;
+
+  it("does not tag auto-captured memories with category metadata", async () => {
+    const handlers: Record<string, (...a: any[]) => any> = {};
+    const mem0 = { add: vi.fn().mockResolvedValue({ results: [] }) } as any;
+    setupAutoCapture(
+      buildPi(handlers),
+      mem0,
+      { autoCapture: true } as any,
+      () => ({ userId: "u", appId: "a", runId: "r" }),
+    );
+
+    await handlers["agent_end"]({
+      messages: [
+        { role: "user", content: "Hi" },
+        { role: "assistant", content: "Hello" },
+      ],
+    });
+
+    expect(mem0.add).toHaveBeenCalledTimes(1);
+    // Auto-capture is passive -- only agent-curated saves carry category tags.
+    expect(mem0.add.mock.calls[0][1].metadata).toBeUndefined();
+  });
+
+  it("does not register the hook when autoCapture is disabled", () => {
+    const handlers: Record<string, (...a: any[]) => any> = {};
+    setupAutoCapture(
+      buildPi(handlers),
+      { add: vi.fn() } as any,
+      { autoCapture: false } as any,
+      () => ({ userId: "u", appId: "a", runId: "r" }),
+    );
+    expect(handlers["agent_end"]).toBeUndefined();
   });
 });

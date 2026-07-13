@@ -21,19 +21,28 @@ If no query provided, ask: "What should I search for?"
 
 Use `mem0_memory` tool with `action="search"`, `query=<user's query>`.
 
+To narrow to a category, also pass `metadata` — e.g. `metadata={"category":"preferences"}` — which filters to memories whose tags match every given key/value (in addition to the semantic query).
+
 ### Step 3: Display
 
-Show compact results:
+Show compact results. Each memory is two lines: the text + age, then its category badges and id:
 
 ```
 ## mem0 search: "<query>" (<N> results)
 
-1. [preferences] Prefers window seats on flights (2026-05-15) [mem0:a3f8b2c1]
-2. [goals] Wants to visit Japan in 2027 (2026-05-10) [mem0:7e2d9f4a]
-3. [identity] Lives in San Francisco (2026-05-08) [mem0:c4d5e6f7]
+1. Prefers window seats on flights (2026-05-15)
+   [category:preferences] [mem0:a3f8b2c1]
+2. Wants to visit Japan in 2027 (2026-05-10)
+   [category:goals] [mem0:7e2d9f4a]
+3. Lives in San Francisco (2026-05-08)
+   [mem0:c4d5e6f7]
 ```
 
-Format: `<number>. [<category>] <content, 80 chars> (<date>) [mem0:<short_id>]`
+Format per memory:
+- Line 1: `<number>. <content, 80 chars> (<date>)`
+- Line 2: `   <[key:val] badges from metadata> [mem0:<short_id>]`
+
+A memory with no tags (e.g. auto-captured) simply shows no badges on line 2.
 
 If no results:
 ```
