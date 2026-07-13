@@ -1,18 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { format, formatDistanceToNow } from "date-fns";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 import { DataTable } from "@/components/shared/data-table";
 import { TableSkeleton } from "@/components/shared/table-skeleton";
 import { EmptyState } from "@/components/self-hosted/empty-state";
+import { RequestDetail } from "@/components/shared/request-detail";
 import { api } from "@/utils/api";
 import { REQUEST_ENDPOINTS } from "@/utils/api-endpoints";
 import { useApiQuery } from "@/hooks/use-api-query";
-import { ApiRequestLog } from "@/types/api";
+import { ApiRequestLog, EntityType } from "@/types/api";
 
 type RequestLog = {
   id: string;
@@ -22,10 +38,34 @@ type RequestLog = {
   statusCode: number;
   latencyMs: number;
   authType: string;
+  userId?: string | null;
+  appId?: string | null;
 };
 
 const REQUEST_LOG_LIMIT = 200;
 const PAGE_SIZE = 20;
+
+const ENTITY_FILTERS: { type: EntityType; label: string; param: string }[] = [
+  { type: "user", label: "User", param: "user_id" },
+  { type: "agent", label: "Agent", param: "agent_id" },
+  { type: "run", label: "Run", param: "run_id" },
+  { type: "app", label: "App", param: "app_id" },
+];
+
+const paramForType = (type: EntityType): string =>
+  ENTITY_FILTERS.find((f) => f.type === type)?.param ?? "user_id";
+
+// Read ?type=&id= (set when navigating here from the Entities page).
+const initialFilterFromUrl = (): { type: EntityType; id: string } => {
+  if (typeof window === "undefined") return { type: "user", id: "" };
+  const params = new URLSearchParams(window.location.search);
+  const type = params.get("type") as EntityType | null;
+  const valid = ENTITY_FILTERS.some((f) => f.type === type);
+  return {
+    type: valid && type ? type : "user",
+    id: params.get("id") ?? "",
+  };
+};
 
 const getStatusClassName = (statusCode: number) => {
   if (statusCode >= 500) {
@@ -77,12 +117,24 @@ const normalizeLog = (entry: ApiRequestLog): RequestLog => {
     statusCode: entry.status_code,
     latencyMs: entry.latency_ms,
     authType: entry.auth_type,
+    userId: entry.user_id,
+    appId: entry.app_id,
   };
 };
 
 export default function RequestsPage() {
+  const initial = initialFilterFromUrl();
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [entityType, setEntityType] = useState<EntityType>(initial.type);
+  const [entityId, setEntityId] = useState(initial.id);
+  const [applied, setApplied] = useState<{ type: EntityType; id: string }>({
+    type: initial.type,
+    id: initial.id,
+  });
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(
+    null,
+  );
 
   const {
     data: logs = [],
@@ -91,14 +143,42 @@ export default function RequestsPage() {
     refetch,
   } = useApiQuery<RequestLog[]>(
     async () => {
+      const params: Record<string, string | number> = {
+        limit: REQUEST_LOG_LIMIT,
+      };
+      if (applied.id.trim()) {
+        params[paramForType(applied.type)] = applied.id.trim();
+      }
       const res = await api.get<ApiRequestLog[]>(REQUEST_ENDPOINTS.BASE, {
-        params: { limit: REQUEST_LOG_LIMIT },
+        params,
       });
       setLastUpdated(new Date().toISOString());
       return (res.data ?? []).map(normalizeLog);
     },
     { errorToast: "Failed to load request logs", initialData: [] },
   );
+
+  // useApiQuery already fetches on mount; only refetch when the committed filter changes.
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    void refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applied]);
+
+  const applyFilter = () => {
+    setPage(0);
+    setApplied({ type: entityType, id: entityId });
+  };
+
+  const clearFilter = () => {
+    setEntityId("");
+    setPage(0);
+    setApplied({ type: entityType, id: "" });
+  };
 
   const totalRequests = logs.length;
   const successfulRequests = logs.filter((log) => log.statusCode < 400).length;
@@ -163,8 +243,20 @@ export default function RequestsPage() {
     {
       key: "authType" as keyof RequestLog,
       label: "Auth",
-      width: 120,
+      width: 100,
       render: (value: string) => getAuthLabel(value),
+    },
+    {
+      key: "userId" as keyof RequestLog,
+      label: "User",
+      width: 100,
+      render: (value: string | null) => value || "--",
+    },
+    {
+      key: "appId" as keyof RequestLog,
+      label: "App",
+      width: 100,
+      render: (value: string | null) => value || "--",
     },
   ];
 
@@ -219,6 +311,41 @@ export default function RequestsPage() {
         ))}
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <Select
+          value={entityType}
+          onValueChange={(value) => setEntityType(value as EntityType)}
+        >
+          <SelectTrigger className="w-32">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ENTITY_FILTERS.map((f) => (
+              <SelectItem key={f.type} value={f.type}>
+                {f.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input
+          placeholder="Filter by entity ID (optional)"
+          value={entityId}
+          onChange={(e) => setEntityId(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") applyFilter();
+          }}
+          className="w-64"
+        />
+        <Button variant="outline" onClick={applyFilter} disabled={isLoading}>
+          Filter
+        </Button>
+        {entityId.trim() && (
+          <Button variant="ghost" size="icon" onClick={clearFilter}>
+            <X className="size-4" />
+          </Button>
+        )}
+      </div>
+
       {error && (
         <Card className="border-memBorder-primary">
           <CardContent className="p-4 text-sm text-onSurface-danger-primary">
@@ -242,6 +369,12 @@ export default function RequestsPage() {
               data={logs.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)}
               columns={columns}
               getRowKey={(row) => row.id}
+              onRowClick={(row) => setSelectedRequestId(row.id)}
+              getRowClassName={(row) =>
+                selectedRequestId === row.id
+                  ? "bg-surface-default-tertiary"
+                  : undefined
+              }
             />
           </Card>
           {logs.length > PAGE_SIZE && (
@@ -272,6 +405,23 @@ export default function RequestsPage() {
           )}
         </>
       )}
+
+      <Sheet
+        open={!!selectedRequestId}
+        onOpenChange={(open) => {
+          if (!open) setSelectedRequestId(null);
+        }}
+      >
+        <SheetContent className="sm:max-w-lg">
+          <SheetHeader>
+            <SheetTitle>Request Detail</SheetTitle>
+            <SheetDescription className="sr-only">
+              View request payload and resulting memory actions
+            </SheetDescription>
+          </SheetHeader>
+          {selectedRequestId && <RequestDetail requestId={selectedRequestId} />}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

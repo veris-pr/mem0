@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, Mock
 import pytest
 
 from mem0.exceptions import LLMError
-from mem0.memory.main import AsyncMemory, Memory
+from mem0.memory.main import AsyncMemory, Memory, _build_filters_and_metadata
 
 
 def _setup_mocks(mocker):
@@ -1083,3 +1083,93 @@ class TestAddPipelineEntityEmbeddingCountGuard:
         assert any("padding/truncating" in r.message for r in caplog.records), (
             "expected count-mismatch warning was not emitted"
         )
+
+
+class TestAppIdScoping:
+    """app_id makes memories project-scoped: stored, searched, and de-duplicated per app."""
+
+    def test_build_filters_and_metadata_includes_app_id(self):
+        metadata, filters = _build_filters_and_metadata(user_id="alice", app_id="proj-a")
+        assert metadata["app_id"] == "proj-a"
+        assert filters["app_id"] == "proj-a"
+        assert metadata["user_id"] == "alice"
+        assert filters["user_id"] == "alice"
+
+    def test_app_id_alone_does_not_satisfy_identifier_requirement(self):
+        # app_id is a sub-scope; at least one of user/agent/run is still required.
+        with pytest.raises(Exception):
+            _build_filters_and_metadata(app_id="proj-a")
+
+    def test_add_dedup_search_is_scoped_by_app_id(self, mocker):
+        """The existing-memory retrieval that drives add/update/dedup must filter on app_id,
+        so adding in one project never mutates or dedups against another project's memories."""
+        mock_embedder = mocker.MagicMock()
+        mock_embedder.return_value.embed.return_value = [0.1, 0.2, 0.3]
+        mocker.patch("mem0.utils.factory.EmbedderFactory.create", mock_embedder)
+
+        mock_vector_store = mocker.MagicMock()
+        mock_vector_store.return_value.search.return_value = []
+        mocker.patch(
+            "mem0.utils.factory.VectorStoreFactory.create",
+            side_effect=[mock_vector_store.return_value, mocker.MagicMock()],
+        )
+        mocker.patch("mem0.utils.factory.LlmFactory.create", mocker.MagicMock())
+        mocker.patch("mem0.memory.storage.SQLiteManager", mocker.MagicMock())
+        mocker.patch("mem0.memory.main.capture_event")
+
+        memory = Memory()
+        memory.custom_instructions = None
+        memory.db.get_last_messages = Mock(return_value=[])
+        memory.db.save_messages = Mock()
+        # No facts extracted -> add short-circuits after the existing-memory search we want to assert on.
+        memory.llm.generate_response.return_value = '{"memory": []}'
+
+        memory._add_to_vector_store(
+            messages=[{"role": "user", "content": "Uses pnpm"}],
+            metadata={"user_id": "alice", "app_id": "proj-a"},
+            filters={"user_id": "alice", "app_id": "proj-a"},
+            infer=True,
+        )
+
+        search_calls = memory.vector_store.search.call_args_list
+        assert search_calls, "expected an existing-memory search during add"
+        used_filters = search_calls[0].kwargs.get("filters", {})
+        assert used_filters.get("app_id") == "proj-a"
+        assert used_filters.get("user_id") == "alice"
+
+    def test_get_all_promotes_app_id_to_top_level(self, mocker):
+        """app_id must surface as a first-class top-level field on returned memories,
+        exactly like user_id/agent_id/run_id -- not buried inside `metadata`."""
+        mocker.patch("mem0.utils.factory.EmbedderFactory.create", mocker.MagicMock())
+        mock_vector_store = mocker.MagicMock()
+        mocker.patch(
+            "mem0.utils.factory.VectorStoreFactory.create",
+            side_effect=[mock_vector_store.return_value, mocker.MagicMock()],
+        )
+        mocker.patch("mem0.utils.factory.LlmFactory.create", mocker.MagicMock())
+        mocker.patch("mem0.memory.storage.SQLiteManager", mocker.MagicMock())
+        mocker.patch("mem0.memory.main.capture_event")
+
+        memory = Memory()
+        row = SimpleNamespace(
+            id="m1",
+            payload={
+                "data": "The mem0 project uses pnpm",
+                "user_id": "alice",
+                "app_id": "mem0",
+                "hash": "h",
+                "created_at": "2026-07-13T00:00:00+00:00",
+                "updated_at": "2026-07-13T00:00:00+00:00",
+                "custom_key": "keep-me",
+            },
+        )
+        memory.vector_store.list = Mock(return_value=[[row]])
+
+        result = memory.get_all(filters={"user_id": "alice", "app_id": "mem0"})
+        mem = result["results"][0]
+
+        assert mem["app_id"] == "mem0"
+        assert mem["user_id"] == "alice"
+        # Promoted, not duplicated into metadata; genuine metadata still passes through.
+        assert "app_id" not in mem.get("metadata", {})
+        assert mem["metadata"]["custom_key"] == "keep-me"

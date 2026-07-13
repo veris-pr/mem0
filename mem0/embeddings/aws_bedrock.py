@@ -57,7 +57,7 @@ class AWSBedrockEmbedding(EmbeddingBase):
         norm_emb = emb / np.linalg.norm(emb)
         return norm_emb.tolist()
 
-    def _get_embedding(self, text):
+    def _get_embedding(self, text, memory_action: Optional[Literal["add", "search", "update"]] = None):
         """Call out to Bedrock embedding endpoint."""
 
         # Format input body based on the provider
@@ -65,8 +65,12 @@ class AWSBedrockEmbedding(EmbeddingBase):
         input_body = {}
 
         if provider == "cohere":
-            input_body["input_type"] = "search_document"
+            input_body["input_type"] = "search_query" if memory_action == "search" else "search_document"
             input_body["texts"] = [text]
+            if "embed-v4" in self.config.model:
+                input_body["embedding_types"] = ["float"]
+                if self.config.embedding_dims is not None:
+                    input_body["output_dimension"] = self.config.embedding_dims
         else:
             # Amazon and other providers
             input_body["inputText"] = text
@@ -89,7 +93,10 @@ class AWSBedrockEmbedding(EmbeddingBase):
             response_body = json.loads(response.get("body").read())
 
             if provider == "cohere":
-                embeddings = response_body.get("embeddings")[0]
+                embeddings = response_body.get("embeddings")
+                if isinstance(embeddings, dict):
+                    embeddings = embeddings.get("float")
+                embeddings = embeddings[0]
             else:
                 embeddings = response_body.get("embedding")
 
@@ -107,4 +114,4 @@ class AWSBedrockEmbedding(EmbeddingBase):
         Returns:
             list: The embedding vector.
         """
-        return self._get_embedding(text)
+        return self._get_embedding(text, memory_action)

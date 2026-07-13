@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowRight, ScrollText, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,20 @@ import { useApiQuery } from "@/hooks/use-api-query";
 import { Entity } from "@/types/api";
 
 export default function EntitiesPage() {
+  const router = useRouter();
   const [entityToDelete, setEntityToDelete] = useState<Entity | null>(null);
+
+  const viewMemories = (entity: Entity) => {
+    router.push(
+      `/dashboard/memories?type=${entity.type}&id=${encodeURIComponent(entity.id)}`,
+    );
+  };
+
+  const viewRequests = (entity: Entity) => {
+    router.push(
+      `/dashboard/requests?type=${entity.type}&id=${encodeURIComponent(entity.id)}`,
+    );
+  };
 
   const {
     data: entities = [],
@@ -85,16 +99,46 @@ export default function EntitiesPage() {
     {
       key: "id" as keyof Entity,
       label: "",
-      width: 40,
+      width: 120,
       render: (_: string, row: Entity) => (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setEntityToDelete(row)}
-          className="size-7"
-        >
-          <Trash2 className="size-3.5 text-onSurface-danger-primary" />
-        </Button>
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={(e) => {
+              e.stopPropagation();
+              viewRequests(row);
+            }}
+            className="size-7"
+            title="View requests"
+          >
+            <ScrollText className="size-3.5 text-onSurface-default-secondary" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={(e) => {
+              e.stopPropagation();
+              viewMemories(row);
+            }}
+            className="size-7"
+            title="View memories"
+          >
+            <ArrowRight className="size-3.5 text-onSurface-default-secondary" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={(e) => {
+              e.stopPropagation();
+              setEntityToDelete(row);
+            }}
+            className="size-7"
+            title="Delete entity"
+          >
+            <Trash2 className="size-3.5 text-onSurface-danger-primary" />
+          </Button>
+        </div>
       ),
     },
   ];
@@ -108,7 +152,7 @@ export default function EntitiesPage() {
       ) : entities.length === 0 ? (
         <EmptyState
           title="No entities yet"
-          description="Entities appear once memories are stored with a user_id, agent_id, or run_id."
+          description="Entities appear once memories are stored with a user_id, agent_id, run_id, or app_id."
         />
       ) : (
         <Card className="border-memBorder-primary overflow-hidden">
@@ -116,6 +160,7 @@ export default function EntitiesPage() {
             data={entities}
             columns={columns}
             getRowKey={(row) => `${row.type}:${row.id}`}
+            onRowClick={viewMemories}
           />
         </Card>
       )}

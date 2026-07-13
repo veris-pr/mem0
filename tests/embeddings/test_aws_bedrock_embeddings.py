@@ -61,15 +61,20 @@ def test_no_session_token_passes_none(mock_boto3_client):
     assert kwargs["aws_session_token"] is None
 
 
-def _captured_request_body(mock_boto3_client, config):
+def _captured_request_body(mock_boto3_client, config, memory_action=None):
     """Run a single embed call and return the JSON body sent to invoke_model."""
     runtime = mock_boto3_client.return_value
     response_stream = Mock()
-    response_stream.read.return_value = json.dumps({"embedding": [0.0, 0.1, 0.2]}).encode()
+    response = (
+        {"embeddings": [[0.0, 0.1, 0.2]]}
+        if config.model.startswith("cohere.")
+        else {"embedding": [0.0, 0.1, 0.2]}
+    )
+    response_stream.read.return_value = json.dumps(response).encode()
     runtime.invoke_model.return_value = {"body": response_stream}
 
     embedder = AWSBedrockEmbedding(config)
-    embedder.embed("hello world")
+    embedder.embed("hello world", memory_action)
 
     _, call_kwargs = runtime.invoke_model.call_args
     return json.loads(call_kwargs["body"])
@@ -105,3 +110,42 @@ def test_titan_v1_ignores_embedding_dims(mock_boto3_client):
         body = _captured_request_body(mock_boto3_client, config)
 
     assert "dimensions" not in body
+
+
+def test_cohere_embed_v4_uses_document_input_for_stored_memories(mock_boto3_client):
+    with patch("mem0.embeddings.aws_bedrock.os.environ", {}):
+        config = BaseEmbedderConfig(model="cohere.embed-v4:0", embedding_dims=1536)
+        body = _captured_request_body(mock_boto3_client, config, "add")
+
+    assert body == {
+        "input_type": "search_document",
+        "texts": ["hello world"],
+        "embedding_types": ["float"],
+        "output_dimension": 1536,
+    }
+
+
+def test_cohere_embed_v4_uses_query_input_for_search(mock_boto3_client):
+    with patch("mem0.embeddings.aws_bedrock.os.environ", {}):
+        config = BaseEmbedderConfig(model="cohere.embed-v4:0")
+        body = _captured_request_body(mock_boto3_client, config, "search")
+
+    assert body == {
+        "input_type": "search_query",
+        "texts": ["hello world"],
+        "embedding_types": ["float"],
+    }
+
+
+def test_cohere_embed_v4_parses_typed_float_response(mock_boto3_client):
+    runtime = mock_boto3_client.return_value
+    response_stream = Mock()
+    response_stream.read.return_value = json.dumps(
+        {"embeddings": {"float": [[0.1, 0.2, 0.3]]}, "response_type": "embeddings_by_type"}
+    ).encode()
+    runtime.invoke_model.return_value = {"body": response_stream}
+    config = BaseEmbedderConfig(model="cohere.embed-v4:0")
+
+    result = AWSBedrockEmbedding(config).embed("hello world", "search")
+
+    assert result == [0.1, 0.2, 0.3]

@@ -1,8 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
-import type MemoryClient from "mem0ai";
 import type { Scope, ScopeContext, Mem0Config } from "../types.ts";
+import type { MemoryClientLike } from "./client.ts";
 import { DEFAULT_CUSTOM_CATEGORIES } from "../types.ts";
 import { resolveSearchFilters, resolveAddParams } from "./scoping.ts";
 import { formatMemoryList } from "./formatting.ts";
@@ -45,7 +45,7 @@ interface ToolParams {
 }
 
 export function buildToolExecute(
-  mem0: MemoryClient,
+  mem0: MemoryClientLike,
   scopeCtx: ScopeContext,
   defaultScope: Scope,
 ) {
@@ -129,7 +129,7 @@ export function buildToolExecute(
 
 export function registerMemoryTool(
   pi: ExtensionAPI,
-  mem0: MemoryClient,
+  mem0: MemoryClientLike,
   config: Mem0Config,
   getScopeCtx: () => ScopeContext,
   telemetryCtx?: { apiKey?: string },

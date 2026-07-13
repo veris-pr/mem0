@@ -49,6 +49,15 @@ class RequestLog(Base):
     status_code: Mapped[int] = mapped_column(Integer)
     latency_ms: Mapped[float] = mapped_column(Float)
     auth_type: Mapped[str] = mapped_column(String(32), default="none")
+    # Entity ids extracted from the request, so requests can be filtered per entity.
+    user_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    agent_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    run_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    app_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    # Redacted, size-capped JSON snapshots of the request payload and the resulting
+    # memory actions. Populated only for memory operations; NULL otherwise.
+    request_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_body: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 

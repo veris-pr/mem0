@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type MemoryClient from "mem0ai";
 import type { Mem0Config, ScopeContext } from "../types.ts";
+import type { MemoryClientLike } from "../memory/client.ts";
 import { DEFAULT_CUSTOM_CATEGORIES } from "../types.ts";
 import { resolveAddParams } from "../memory/scoping.ts";
 import { captureEvent } from "../telemetry.ts";
@@ -38,7 +38,7 @@ export function extractConversation(
 
 export function setupAutoCapture(
   pi: ExtensionAPI,
-  mem0: MemoryClient,
+  mem0: MemoryClientLike,
   config: Mem0Config,
   getScopeCtx: () => ScopeContext,
   telemetryCtx?: { apiKey?: string },

@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type MemoryClient from "mem0ai";
 import type { Mem0Config, ScopeContext, Scope } from "./types.ts";
+import type { MemoryClientLike } from "./memory/client.ts";
 import { DEFAULT_CUSTOM_CATEGORIES } from "./types.ts";
 import { resolveSearchFilters, resolveAddParams } from "./memory/scoping.ts";
 import { formatMemoryList, formatMemoryCompact, groupByCategory } from "./memory/formatting.ts";
@@ -13,7 +13,7 @@ const SEARCH_TOP_K = 10;
 
 export function registerCommands(
   pi: ExtensionAPI,
-  mem0: MemoryClient,
+  mem0: MemoryClientLike,
   config: Mem0Config,
   getScopeCtx: () => ScopeContext,
   telemetryCtx?: { apiKey?: string },
@@ -52,8 +52,9 @@ export function registerCommands(
       );
       captureCommandEvent("mem0-remember", {}, telemetryCtx);
 
-      const storedItems = (Array.isArray(result) ? result : [])
-        .map((m) => (m as { memory?: string }).memory)
+      const storedMemories = Array.isArray(result) ? result : (result.results ?? []);
+      const storedItems = storedMemories
+        .map((m) => m.memory)
         .filter((m): m is string => Boolean(m));
       const items = storedItems.length > 0 ? storedItems : [text];
       sendFeedback(

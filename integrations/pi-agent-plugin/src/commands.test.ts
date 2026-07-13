@@ -51,6 +51,7 @@ function makeCtx(confirmResult = true) {
 
 const defaultConfig: Mem0Config = {
   apiKey: "test-key",
+  host: "",
   userId: "test-user",
   autoCapture: false,
   defaultScope: "project",

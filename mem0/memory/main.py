@@ -132,7 +132,7 @@ _SENSITIVE_SUFFIXES = (
 )
 
 # Entity parameters that must be passed via filters, not top-level kwargs
-ENTITY_PARAMS = frozenset({"user_id", "agent_id", "run_id"})
+ENTITY_PARAMS = frozenset({"user_id", "agent_id", "run_id", "app_id"})
 
 
 def _reject_top_level_entity_params(kwargs: Dict[str, Any], method_name: str) -> None:
@@ -289,6 +289,7 @@ def _build_filters_and_metadata(
     user_id: Optional[str] = None,
     agent_id: Optional[str] = None,
     run_id: Optional[str] = None,
+    app_id: Optional[str] = None,
     actor_id: Optional[str] = None,  # For query-time filtering
     input_metadata: Optional[Dict[str, Any]] = None,
     input_filters: Optional[Dict[str, Any]] = None,
@@ -338,6 +339,7 @@ def _build_filters_and_metadata(
     user_id = _validate_and_trim_entity_id(user_id, "user_id")
     agent_id = _validate_and_trim_entity_id(agent_id, "agent_id")
     run_id = _validate_and_trim_entity_id(run_id, "run_id")
+    app_id = _validate_and_trim_entity_id(app_id, "app_id")
 
     if user_id:
         base_metadata_template["user_id"] = user_id
@@ -353,6 +355,12 @@ def _build_filters_and_metadata(
         base_metadata_template["run_id"] = run_id
         effective_query_filters["run_id"] = run_id
         session_ids_provided.append("run_id")
+
+    # app_id is a sub-scope (a project/app within a user's memories). It is stored and
+    # used for scoping, but does not by itself satisfy the session-identifier requirement.
+    if app_id:
+        base_metadata_template["app_id"] = app_id
+        effective_query_filters["app_id"] = app_id
 
     if not session_ids_provided:
         raise Mem0ValidationError(
@@ -373,7 +381,7 @@ def _build_filters_and_metadata(
 def _build_session_scope(filters):
     """Build deterministic session scope string from entity IDs."""
     parts = []
-    for key in sorted(["user_id", "agent_id", "run_id"]):
+    for key in sorted(["user_id", "agent_id", "run_id", "app_id"]):
         val = filters.get(key)
         if val:
             parts.append(f"{key}={val}")
@@ -727,6 +735,7 @@ class Memory(MemoryBase):
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         run_id: Optional[str] = None,
+        app_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         timestamp: Optional[Any] = None,
         expiration_date: Optional[Any] = None,
@@ -746,6 +755,9 @@ class Memory(MemoryBase):
             user_id (str, optional): ID of the user creating the memory. Defaults to None.
             agent_id (str, optional): ID of the agent creating the memory. Defaults to None.
             run_id (str, optional): ID of the run creating the memory. Defaults to None.
+            app_id (str, optional): ID of the app/project the memory belongs to. Scopes memories to a
+                project so they are stored, searched, and de-duplicated independently of other apps.
+                Additive: does not by itself satisfy the user/agent/run identifier requirement. Defaults to None.
             metadata (dict, optional): Metadata to store with the memory. Defaults to None.
             timestamp (Any, optional): Platform-only temporal parameter. Not supported in OSS.
             expiration_date (Any, optional): Date in YYYY-MM-DD format. Expired memories are hidden
@@ -781,6 +793,7 @@ class Memory(MemoryBase):
             user_id=user_id,
             agent_id=agent_id,
             run_id=run_id,
+            app_id=app_id,
             input_metadata=metadata,
         )
         if normalized_expiration_date is not None:
@@ -879,7 +892,9 @@ class Memory(MemoryBase):
         parsed_messages = parse_messages(messages)
 
         # Phase 1: Existing memory retrieval
-        search_filters = {k: v for k, v in filters.items() if k in ("user_id", "agent_id", "run_id") and v}
+        # Include app_id so existing-memory retrieval (used for update/dedup decisions) stays
+        # scoped to the current app/project and never mutates memories from another app.
+        search_filters = {k: v for k, v in filters.items() if k in ("user_id", "agent_id", "run_id", "app_id") and v}
         query_embedding = self.embedding_model.embed(parsed_messages, "search")
         existing_results = self.vector_store.search(
             query=parsed_messages,
@@ -1183,6 +1198,7 @@ class Memory(MemoryBase):
             "user_id",
             "agent_id",
             "run_id",
+            "app_id",
             "actor_id",
             "role",
             "attributed_to",
@@ -1256,6 +1272,10 @@ class Memory(MemoryBase):
             effective_filters["run_id"] = _validate_and_trim_entity_id(
                 effective_filters["run_id"], "run_id"
             )
+        if "app_id" in effective_filters:
+            effective_filters["app_id"] = _validate_and_trim_entity_id(
+                effective_filters["app_id"], "app_id"
+            )
 
         # Validate filters contains at least one entity ID
         if not any(key in effective_filters for key in ("user_id", "agent_id", "run_id")):
@@ -1301,6 +1321,7 @@ class Memory(MemoryBase):
             "user_id",
             "agent_id",
             "run_id",
+            "app_id",
             "actor_id",
             "role",
             "attributed_to",
@@ -1411,6 +1432,10 @@ class Memory(MemoryBase):
         if "run_id" in effective_filters:
             effective_filters["run_id"] = _validate_and_trim_entity_id(
                 effective_filters["run_id"], "run_id"
+            )
+        if "app_id" in effective_filters:
+            effective_filters["app_id"] = _validate_and_trim_entity_id(
+                effective_filters["app_id"], "app_id"
             )
         if not any(key in effective_filters for key in ("user_id", "agent_id", "run_id")):
             raise ValueError(
@@ -1649,6 +1674,7 @@ class Memory(MemoryBase):
             "user_id",
             "agent_id",
             "run_id",
+            "app_id",
             "actor_id",
             "role",
             "attributed_to",
@@ -1843,7 +1869,13 @@ class Memory(MemoryBase):
             display_first_run_notice(self, "sync", "delete")
         return {"message": "Memory deleted successfully!"}
 
-    def delete_all(self, user_id: Optional[str] = None, agent_id: Optional[str] = None, run_id: Optional[str] = None):
+    def delete_all(
+        self,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        app_id: Optional[str] = None,
+    ):
         """
         Delete all memories.
 
@@ -1851,10 +1883,12 @@ class Memory(MemoryBase):
             user_id (str, optional): ID of the user to delete memories for. Defaults to None.
             agent_id (str, optional): ID of the agent to delete memories for. Defaults to None.
             run_id (str, optional): ID of the run to delete memories for. Defaults to None.
+            app_id (str, optional): ID of the app/project to delete memories for. Defaults to None.
         """
         user_id = _validate_and_trim_entity_id(user_id, "user_id")
         agent_id = _validate_and_trim_entity_id(agent_id, "agent_id")
         run_id = _validate_and_trim_entity_id(run_id, "run_id")
+        app_id = _validate_and_trim_entity_id(app_id, "app_id")
 
         filters: Dict[str, Any] = {}
         if user_id:
@@ -1863,6 +1897,8 @@ class Memory(MemoryBase):
             filters["agent_id"] = agent_id
         if run_id:
             filters["run_id"] = run_id
+        if app_id:
+            filters["app_id"] = app_id
 
         if not filters:
             raise ValueError(
@@ -2378,6 +2414,7 @@ class AsyncMemory(MemoryBase):
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         run_id: Optional[str] = None,
+        app_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         timestamp: Optional[Any] = None,
         expiration_date: Optional[Any] = None,
@@ -2412,7 +2449,7 @@ class AsyncMemory(MemoryBase):
         normalized_expiration_date = _normalize_expiration_date(expiration_date)
         temporal_usage_notice = detect_temporal_usage_from_metadata(metadata)
         processed_metadata, effective_filters = _build_filters_and_metadata(
-            user_id=user_id, agent_id=agent_id, run_id=run_id, input_metadata=metadata
+            user_id=user_id, agent_id=agent_id, run_id=run_id, app_id=app_id, input_metadata=metadata
         )
         if normalized_expiration_date is not None:
             processed_metadata["expiration_date"] = normalized_expiration_date
@@ -2516,7 +2553,11 @@ class AsyncMemory(MemoryBase):
         parsed_messages = parse_messages(messages)
 
         # Phase 1: Existing memory retrieval
-        search_filters = {k: v for k, v in effective_filters.items() if k in ("user_id", "agent_id", "run_id") and v}
+        # Include app_id so existing-memory retrieval (used for update/dedup decisions) stays
+        # scoped to the current app/project and never mutates memories from another app.
+        search_filters = {
+            k: v for k, v in effective_filters.items() if k in ("user_id", "agent_id", "run_id", "app_id") and v
+        }
         query_embedding = await asyncio.to_thread(self.embedding_model.embed, parsed_messages, "search")
         existing_results = await asyncio.to_thread(
             self.vector_store.search,
@@ -2817,6 +2858,7 @@ class AsyncMemory(MemoryBase):
             "user_id",
             "agent_id",
             "run_id",
+            "app_id",
             "actor_id",
             "role",
             "attributed_to",
@@ -2890,6 +2932,10 @@ class AsyncMemory(MemoryBase):
             effective_filters["run_id"] = _validate_and_trim_entity_id(
                 effective_filters["run_id"], "run_id"
             )
+        if "app_id" in effective_filters:
+            effective_filters["app_id"] = _validate_and_trim_entity_id(
+                effective_filters["app_id"], "app_id"
+            )
 
         # Validate filters contains at least one entity ID
         if not any(key in effective_filters for key in ("user_id", "agent_id", "run_id")):
@@ -2935,6 +2981,7 @@ class AsyncMemory(MemoryBase):
             "user_id",
             "agent_id",
             "run_id",
+            "app_id",
             "actor_id",
             "role",
             "attributed_to",
@@ -3047,6 +3094,10 @@ class AsyncMemory(MemoryBase):
         if "run_id" in effective_filters:
             effective_filters["run_id"] = _validate_and_trim_entity_id(
                 effective_filters["run_id"], "run_id"
+            )
+        if "app_id" in effective_filters:
+            effective_filters["app_id"] = _validate_and_trim_entity_id(
+                effective_filters["app_id"], "app_id"
             )
 
         # Validate filters contains at least one entity ID
@@ -3289,6 +3340,7 @@ class AsyncMemory(MemoryBase):
             "user_id",
             "agent_id",
             "run_id",
+            "app_id",
             "actor_id",
             "role",
             "attributed_to",
@@ -3475,7 +3527,7 @@ class AsyncMemory(MemoryBase):
             await display_first_run_notice_async(self, "async", "delete")
         return {"message": "Memory deleted successfully!"}
 
-    async def delete_all(self, user_id=None, agent_id=None, run_id=None):
+    async def delete_all(self, user_id=None, agent_id=None, run_id=None, app_id=None):
         """
         Delete all memories asynchronously.
 
@@ -3483,10 +3535,12 @@ class AsyncMemory(MemoryBase):
             user_id (str, optional): ID of the user to delete memories for. Defaults to None.
             agent_id (str, optional): ID of the agent to delete memories for. Defaults to None.
             run_id (str, optional): ID of the run to delete memories for. Defaults to None.
+            app_id (str, optional): ID of the app/project to delete memories for. Defaults to None.
         """
         user_id = _validate_and_trim_entity_id(user_id, "user_id")
         agent_id = _validate_and_trim_entity_id(agent_id, "agent_id")
         run_id = _validate_and_trim_entity_id(run_id, "run_id")
+        app_id = _validate_and_trim_entity_id(app_id, "app_id")
 
         filters = {}
         if user_id:
@@ -3495,6 +3549,8 @@ class AsyncMemory(MemoryBase):
             filters["agent_id"] = agent_id
         if run_id:
             filters["run_id"] = run_id
+        if app_id:
+            filters["app_id"] = app_id
 
         if not filters:
             raise ValueError(
