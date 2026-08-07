@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import MemoryClient from "mem0ai";
 import { loadConfig, CONFIG_DIR } from "./config/index.ts";
+import { createMemoryClient } from "./memory/client.ts";
 import { detectAppId, detectRunId, resolveSearchFilters } from "./memory/scoping.ts";
 import { formatMemoryList } from "./memory/formatting.ts";
 import { registerMemoryTool } from "./memory/tools.ts";
@@ -55,12 +55,12 @@ export async function buildRecallContext(
 export default function mem0Extension(pi: ExtensionAPI): void {
   const config = loadConfig();
 
-  if (!config.apiKey) {
-    console.warn("[mem0] No API key found. Set MEM0_API_KEY or add apiKey to ~/.pi/agent/mem0-config.json. Extension disabled.");
+  if (!config.apiKey && !config.host) {
+    console.warn("[mem0] No connection configured. Set MEM0_API_KEY for Mem0 Cloud or MEM0_HOST for self-hosted Mem0. Extension disabled.");
     return;
   }
 
-  const mem0 = new MemoryClient({ apiKey: config.apiKey });
+  const mem0 = createMemoryClient(config);
 
   const scopeCtx: ScopeContext = {
     userId: resolveUserId(config.userId),

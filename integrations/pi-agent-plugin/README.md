@@ -17,9 +17,9 @@ This extension gives Pi Agent long-term memory that persists across sessions, pr
 
 ## Setup
 
-### 1. Get an API key
+### 1. Choose a Mem0 deployment
 
-Sign up at [app.mem0.ai](https://app.mem0.ai/dashboard/api-keys) and copy your API key.
+For Mem0 Cloud, sign up at [app.mem0.ai](https://app.mem0.ai/dashboard/api-keys) and copy your API key. For self-hosted Mem0, start the [REST API server](https://docs.mem0.ai/open-source/features/rest-api) and note its origin, such as `http://localhost:8888`.
 
 ### 2. Install
 
@@ -29,17 +29,33 @@ pi install npm:@mem0/pi-agent-plugin
 
 ### 3. Configure
 
-Set the API key as an environment variable:
+For Mem0 Cloud, set the API key:
 
 ```bash
 export MEM0_API_KEY="m0-your-key-here"
 ```
+
+For self-hosted Mem0, set only the server origin when auth is disabled:
+
+```bash
+export MEM0_HOST="http://localhost:8888"
+```
+
+When self-hosted auth is enabled, also set its API key. The plugin sends it as `X-API-Key`:
+
+```bash
+export MEM0_HOST="https://memory.example.com"
+export MEM0_API_KEY="m0sk-your-self-hosted-key"
+```
+
+`MEM0_HOST` selects the self-hosted REST API. Do not append `/memories` or a versioned path.
 
 Or create a config file at `~/.pi/agent/mem0-config.json`:
 
 ```json
 {
   "apiKey": "m0-your-key-here",
+  "host": "",
   "userId": "your-username",
   "autoCapture": true,
   "defaultScope": "project",
@@ -54,7 +70,7 @@ Or create a config file at `~/.pi/agent/mem0-config.json`:
 }
 ```
 
-Environment variables (`MEM0_API_KEY`, `MEM0_USER_ID`) override the config file.
+Environment variables (`MEM0_API_KEY`, `MEM0_HOST`, `MEM0_USER_ID`) override the config file. Leave `host` empty for Mem0 Cloud.
 
 `searchThreshold` (default `0.3`) is the minimum similarity score (0–1) a memory must reach to count as a match for `/mem0-search`, `/mem0-forget`, and `/mem0-pin`. It is passed to the mem0 search API (along with reranking for higher-precision ordering), so a query with no sufficiently similar memory reports no match instead of returning the closest unrelated memories. Raise it to be stricter; lower it if relevant results are missed.
 

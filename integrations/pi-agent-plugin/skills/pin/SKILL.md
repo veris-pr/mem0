@@ -24,7 +24,7 @@ The user provides either a search query or memory ID.
 
 Pinning works by prepending `[PINNED]` to the memory text. This marker tells the dream consolidation to skip it during pruning.
 
-Use `mem0_memory` tool with `action="add"`, `content="[PINNED] <original memory text>"`.
+Use `mem0_memory` tool with `action="add"`, `content="[PINNED] <original memory text>"`. Pass the original memory's `key:value` tags via `metadata` so the pinned copy keeps its category badges (re-adding otherwise loses them).
 
 Then delete the original using `mem0_memory` with `action="delete"` and the original memory ID.
 
@@ -43,6 +43,6 @@ Append `...` only if content exceeds 80 characters.
 
 If the user says "unpin":
 1. Find the memory (search or by ID).
-2. Create a new memory without the `[PINNED]` prefix.
+2. Create a new memory without the `[PINNED]` prefix, carrying over its `key:value` tags via `metadata`.
 3. Delete the pinned version.
 4. Print: `Unpinned: "<content>..."`

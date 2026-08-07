@@ -14,20 +14,30 @@ services:
     volumes:
       - ./history:/app/history
       - .:/app
+      - ../mem0:/app/mem0:ro
+      - ${HOME}/.aws:/root/.aws:ro
     depends_on:
       postgres:
         condition: service_healthy
     command: >
-      sh -c "rm -rf /app/packages && pip install -q --force-reinstall --no-deps mem0ai && alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
     environment:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
-      - PYTHONPATH=
+      - PYTHONPATH=/app
       - DASHBOARD_URL=http://localhost:3000
       - APP_DB_NAME=mem0_app
       - JWT_SECRET=${JWT_SECRET}
       - AUTH_DISABLED=${AUTH_DISABLED:-false}
       - MEM0_TELEMETRY=${MEM0_TELEMETRY:-true}
+      - AWS_PROFILE=${AWS_PROFILE:-default}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_DEFAULT_REGION=${AWS_REGION:-us-east-1}
+      - MEM0_DEFAULT_LLM_PROVIDER=${MEM0_DEFAULT_LLM_PROVIDER:-openai}
+      - MEM0_DEFAULT_LLM_MODEL=${MEM0_DEFAULT_LLM_MODEL:-gpt-4.1-nano-2025-04-14}
+      - MEM0_DEFAULT_EMBEDDER_PROVIDER=${MEM0_DEFAULT_EMBEDDER_PROVIDER:-openai}
+      - MEM0_DEFAULT_EMBEDDER_MODEL=${MEM0_DEFAULT_EMBEDDER_MODEL:-text-embedding-3-small}
+      - MEM0_DEFAULT_EMBEDDING_DIMS=${MEM0_DEFAULT_EMBEDDING_DIMS:-1536}
 
   postgres:
       image: pgvector/pgvector:pg17

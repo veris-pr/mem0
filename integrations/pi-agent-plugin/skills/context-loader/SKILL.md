@@ -28,13 +28,13 @@ Pre-fetches relevant memories to prime context before working on a task or topic
 
 3. **Deduplicate** results by memory ID across all search responses.
 
-4. **Output compact context block** (max 10 memories):
+4. **Output compact context block** (max 10 memories). Append each memory's `[key:val]` tags, if any:
 
 ```
 context-loader: loaded <N> memories for "<task summary>"
-  - [decisions] <content> [mem0:<short_id>]
-  - [preferences] <content> [mem0:<short_id>]
-  - [lessons] <content> [mem0:<short_id>]
+  - <content> [category:decisions] [mem0:<short_id>]
+  - <content> [category:preferences] [mem0:<short_id>]
+  - <content> [mem0:<short_id>]
 ```
 
 5. If **zero results**: output nothing. Don't announce empty context.

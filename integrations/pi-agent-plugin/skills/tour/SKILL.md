@@ -1,22 +1,22 @@
 ---
 name: tour
-description: Browses all stored memories grouped by category with full content display. Use when reviewing all memories, exploring stored knowledge, onboarding to a new session, or getting an overview of what the agent remembers.
+description: Browses all stored memories (most recent first, with their key:value tags) and full content display. Use when reviewing all memories, exploring stored knowledge, onboarding to a new session, or getting an overview of what the agent remembers.
 ---
 
 # Memory Tour
 
-Show the user what Mem0 has stored — a full walkthrough of all memories grouped by category.
+Show the user what Mem0 has stored — a full walkthrough of all memories, most recent first, with their key:value tags.
 
 ## Cross-project mode
 
 When invoked with `--all-projects` (e.g., `/mem0-tour --all-projects`), search across ALL projects:
 
 1. Use `mem0_memory` tool with `action="get_all"`, `scope="global"` — no project filter.
-2. Group results by project first, then by category within each project.
+2. Group results by project (the `app_id` entity). List memories flat within each project, most recent first.
 3. Display:
    ```
    ## <project_1> (<N> memories) <- current
-   **Goals** — <memory content>
+   - <memory content> [key:val]…
    ...
 
    ## <project_2> (<N> memories)
@@ -44,40 +44,29 @@ If no query argument and no `--all-projects` flag, use the full tour flow below.
 
 Use `mem0_memory` tool with `action="get_all"`.
 
-### Step 2: Group by category
+### Step 2: Order
 
-Group memories using their `categories` field. Map to display names:
+Sort memories most-recent-first. There is no fixed category taxonomy — memories carry only the `key:value` tags the agent chose (many, e.g. auto-captured ones, have none), so do not try to bucket them into predefined categories.
 
-| Category | Display name |
-|---|---|
-| `identity` | Identity & Background |
-| `preferences` | Preferences |
-| `goals` | Goals & Aspirations |
-| `projects` | Projects & Initiatives |
-| `decisions` | Decisions |
-| `technical` | Technical Knowledge |
-| `relationships` | People & Relationships |
-| `routines` | Routines & Workflows |
-| `lessons` | Lessons Learned |
-| `work` | Work & Professional |
-| anything else | Other |
+Optionally, if many memories share a common tag key (e.g. most have a `category:` or `type:` tag), you MAY group by the distinct values of that one key and put untagged memories under a final `## Untagged` group. Otherwise present a single flat list.
 
 ### Step 3: Display results
 
-Sort groups by descending memory count. For each group:
+Show the **full memory text** for each entry — do NOT truncate — with its tags and age:
 
 ```
-## <display_name> (<count> memories)
+## Memories (<N>)
+- <full_memory_content> (<date>) [key:val]…
 - <full_memory_content> (<date>)
 - ...
 ```
 
-Show the **full memory text** for each entry — do NOT truncate. If a group has more than 10 entries, show top 10 by recency and note `... and <N> more`.
+If there are more than 20 entries, show the top 20 by recency and note `... and <N> more`.
 
 ### Step 4: Print totals
 
 ```
-<N> memories across <M> categories
+<N> memories
 ```
 
 ### Step 5: Empty state

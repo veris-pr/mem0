@@ -1,9 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type MemoryClient from "mem0ai";
 import type { Mem0Config, ScopeContext, Scope } from "./types.ts";
+import type { MemoryClientLike } from "./memory/client.ts";
 import { DEFAULT_CUSTOM_CATEGORIES } from "./types.ts";
 import { resolveSearchFilters, resolveAddParams } from "./memory/scoping.ts";
-import { formatMemoryList, formatMemoryCompact, groupByCategory } from "./memory/formatting.ts";
+import { formatMemoryList, formatMemoryCompact } from "./memory/formatting.ts";
 import { DREAM_PROTOCOL } from "./dream/prompt.ts";
 import { acquireDreamLock } from "./dream/index.ts";
 import { CONFIG_DIR } from "./config/index.ts";
@@ -13,7 +13,7 @@ const SEARCH_TOP_K = 10;
 
 export function registerCommands(
   pi: ExtensionAPI,
-  mem0: MemoryClient,
+  mem0: MemoryClientLike,
   config: Mem0Config,
   getScopeCtx: () => ScopeContext,
   telemetryCtx?: { apiKey?: string },
@@ -52,8 +52,9 @@ export function registerCommands(
       );
       captureCommandEvent("mem0-remember", {}, telemetryCtx);
 
-      const storedItems = (Array.isArray(result) ? result : [])
-        .map((m) => (m as { memory?: string }).memory)
+      const storedMemories = Array.isArray(result) ? result : (result.results ?? []);
+      const storedItems = storedMemories
+        .map((m) => m.memory)
         .filter((m): m is string => Boolean(m));
       const items = storedItems.length > 0 ? storedItems : [text];
       sendFeedback(
@@ -146,7 +147,7 @@ export function registerCommands(
   });
 
   pi.registerCommand("mem0-tour", {
-    description: "Browse all memories grouped by category",
+    description: "Browse all memories (most recent first, with their tags)",
     handler: async (args, ctx) => {
       const raw = args?.trim().toLowerCase();
       const validScopes: Scope[] = ["project", "session", "global"];
@@ -165,19 +166,20 @@ export function registerCommands(
         return;
       }
 
-      const groups = groupByCategory(memories);
+      // Flat, most-recent-first listing. Memories carry only the agent-chosen key:value
+      // tags (rendered as badges by formatMemoryList) -- there is no fixed category taxonomy
+      // to group by, and grouping an untagged OSS store would just print one "uncategorized"
+      // bucket.
+      const ordered = [...memories].sort((a, b) => {
+        const at = a.createdAt ? new Date(a.createdAt as string | Date).getTime() : 0;
+        const bt = b.createdAt ? new Date(b.createdAt as string | Date).getTime() : 0;
+        return bt - at;
+      });
       const lines: string[] = [
         `**Memory tour** · ${pluralize(memories.length, "memory", "memories")} · ${scope} scope`,
         "",
+        formatMemoryList(ordered),
       ];
-
-      for (const [category, items] of groups) {
-        lines.push(`### ${category} (${items.length})`);
-        for (const m of items) {
-          lines.push(`- ${formatMemoryCompact(m)}`);
-        }
-        lines.push("");
-      }
 
       captureCommandEvent("mem0-tour", { memory_count: memories.length, scope }, telemetryCtx);
       sendFeedback("mem0-tour", lines.join("\n"));

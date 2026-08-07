@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import time
@@ -59,8 +60,8 @@ SENSITIVE_CONFIG_KEYS = {
 SKIPPED_REQUEST_LOG_PATHS = {"/api/health", "/docs", "/redoc", "/openapi.json"}
 SKIPPED_REQUEST_LOG_PREFIXES = ("/requests",)
 
-BUNDLED_LLM_PROVIDERS = ("openai", "anthropic", "gemini")
-BUNDLED_EMBEDDER_PROVIDERS = ("openai", "gemini")
+BUNDLED_LLM_PROVIDERS = ("openai", "anthropic", "gemini", "aws_bedrock")
+BUNDLED_EMBEDDER_PROVIDERS = ("openai", "gemini", "aws_bedrock")
 
 
 def _warn_if_unconfigured() -> None:
@@ -114,8 +115,11 @@ POSTGRES_COLLECTION_NAME = os.environ.get("POSTGRES_COLLECTION_NAME", "memories"
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", "/app/history/history.db")
+DEFAULT_LLM_PROVIDER = os.environ.get("MEM0_DEFAULT_LLM_PROVIDER", "openai")
+DEFAULT_EMBEDDER_PROVIDER = os.environ.get("MEM0_DEFAULT_EMBEDDER_PROVIDER", "openai")
 DEFAULT_LLM_MODEL = os.environ.get("MEM0_DEFAULT_LLM_MODEL", "gpt-5-mini")
 DEFAULT_EMBEDDER_MODEL = os.environ.get("MEM0_DEFAULT_EMBEDDER_MODEL", "text-embedding-3-small")
+DEFAULT_EMBEDDING_DIMS = int(os.environ.get("MEM0_DEFAULT_EMBEDDING_DIMS", "1536"))
 
 DEFAULT_CONFIG = {
     "version": "v1.1",
@@ -128,13 +132,21 @@ DEFAULT_CONFIG = {
             "user": POSTGRES_USER,
             "password": POSTGRES_PASSWORD,
             "collection_name": POSTGRES_COLLECTION_NAME,
+            "embedding_model_dims": DEFAULT_EMBEDDING_DIMS,
         },
     },
     "llm": {
-        "provider": "openai",
+        "provider": DEFAULT_LLM_PROVIDER,
         "config": {"api_key": OPENAI_API_KEY, "temperature": 0.2, "model": DEFAULT_LLM_MODEL},
     },
-    "embedder": {"provider": "openai", "config": {"api_key": OPENAI_API_KEY, "model": DEFAULT_EMBEDDER_MODEL}},
+    "embedder": {
+        "provider": DEFAULT_EMBEDDER_PROVIDER,
+        "config": {
+            "api_key": OPENAI_API_KEY,
+            "model": DEFAULT_EMBEDDER_MODEL,
+            "embedding_dims": DEFAULT_EMBEDDING_DIMS,
+        },
+    },
     "history_db_path": HISTORY_DB_PATH,
 }
 
@@ -182,6 +194,9 @@ class MemoryCreate(BaseModel):
     user_id: Optional[str] = None
     agent_id: Optional[str] = None
     run_id: Optional[str] = None
+    app_id: Optional[str] = Field(
+        None, description="ID of the app/project the memory belongs to. Scopes memories per project."
+    )
     metadata: Optional[Dict[str, Any]] = None
     expiration_date: Optional[str] = Field(None, description="Expiration date in YYYY-MM-DD format.")
     infer: Optional[bool] = Field(None, description="Whether to extract facts from messages. Defaults to True.")
@@ -268,8 +283,51 @@ def _should_log_request(request: Request) -> bool:
     return not path.startswith(SKIPPED_REQUEST_LOG_PREFIXES)
 
 
-def _persist_request_log(method: str, path: str, status_code: int, latency_ms: float, auth_type: str) -> None:
+MAX_LOGGED_BODY_CHARS = 10_000
+LOGGED_ENTITY_KEYS = ("user_id", "agent_id", "run_id", "app_id")
+
+
+def _truncate_for_log(value: Any) -> str:
+    """Serialize a payload to JSON and cap its size so request logs stay bounded."""
+    try:
+        text = json.dumps(value, default=str)
+    except (TypeError, ValueError):
+        text = str(value)
+    if len(text) > MAX_LOGGED_BODY_CHARS:
+        return text[:MAX_LOGGED_BODY_CHARS] + f"... [truncated, {len(text)} chars total]"
+    return text
+
+
+def _capture_request_log(
+    request: Request,
+    *,
+    payload: Optional[Dict[str, Any]] = None,
+    response: Any = None,
+    entities: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Stash a redacted, size-capped snapshot of a memory operation on ``request.state`` so the
+    logging middleware can persist it on the RequestLog row. Endpoint and middleware share the
+    same ASGI scope, so ``request.state`` set here is visible when the log is written."""
+    if payload is not None:
+        request.state.log_request_body = _truncate_for_log(_redact_config(payload))
+    if response is not None:
+        request.state.log_response_body = _truncate_for_log(response)
+    if entities:
+        request.state.log_entities = {k: str(v) for k, v in entities.items() if v}
+
+
+def _persist_request_log(
+    method: str,
+    path: str,
+    status_code: int,
+    latency_ms: float,
+    auth_type: str,
+    entities: Optional[Dict[str, Any]] = None,
+    request_body: Optional[str] = None,
+    response_body: Optional[str] = None,
+) -> None:
     session = SessionLocal()
+    entities = entities or {}
 
     try:
         session.add(
@@ -279,6 +337,12 @@ def _persist_request_log(method: str, path: str, status_code: int, latency_ms: f
                 status_code=status_code,
                 latency_ms=latency_ms,
                 auth_type=auth_type,
+                user_id=entities.get("user_id"),
+                agent_id=entities.get("agent_id"),
+                run_id=entities.get("run_id"),
+                app_id=entities.get("app_id"),
+                request_body=request_body,
+                response_body=response_body,
             )
         )
         session.commit()
@@ -308,6 +372,7 @@ async def log_requests(request: Request, call_next):
     finally:
         request_id_var.reset(token)
         if _should_log_request(request):
+            state = request.state
             asyncio.get_running_loop().run_in_executor(
                 None,
                 _persist_request_log,
@@ -315,7 +380,10 @@ async def log_requests(request: Request, call_next):
                 request.url.path,
                 status_code,
                 round((time.perf_counter() - start) * 1000, 2),
-                getattr(request.state, "auth_type", "none"),
+                getattr(state, "auth_type", "none"),
+                getattr(state, "log_entities", None),
+                getattr(state, "log_request_body", None),
+                getattr(state, "log_response_body", None),
             )
 
 
@@ -365,16 +433,22 @@ def generate_instructions(req: GenerateInstructionsRequest, _auth=Depends(verify
 
 
 @app.post("/memories", summary="Create memories")
-def add_memory(memory_create: MemoryCreate, _auth=Depends(verify_auth)):
+def add_memory(memory_create: MemoryCreate, request: Request, _auth=Depends(verify_auth)):
     """Store new memories."""
     if not any([memory_create.user_id, memory_create.agent_id, memory_create.run_id]):
         raise HTTPException(status_code=400, detail="At least one identifier (user_id, agent_id, run_id) is required.")
 
     params = {k: v for k, v in memory_create.model_dump().items() if v is not None and k != "messages"}
+    _capture_request_log(
+        request,
+        payload=memory_create.model_dump(exclude_none=True),
+        entities={key: getattr(memory_create, key) for key in LOGGED_ENTITY_KEYS},
+    )
     try:
         response = get_memory_instance().add(messages=[m.model_dump() for m in memory_create.messages], **params)
         if response.get("results"):
             telemetry.log_dashboard_nudge_once(DASHBOARD_URL)
+        _capture_request_log(request, response=response)
         return JSONResponse(content=response)
     except (ValueError, Mem0ValidationError) as e:
         raise _client_error(e)
@@ -383,7 +457,17 @@ def add_memory(memory_create: MemoryCreate, _auth=Depends(verify_auth)):
 
 
 ALL_MEMORIES_LIMIT = 1000
-_RESERVED_PAYLOAD_KEYS = {"data", "user_id", "agent_id", "run_id", "hash", "created_at", "updated_at", "expiration_date"}
+_RESERVED_PAYLOAD_KEYS = {
+    "data",
+    "user_id",
+    "agent_id",
+    "run_id",
+    "app_id",
+    "hash",
+    "created_at",
+    "updated_at",
+    "expiration_date",
+}
 
 
 def _serialize_memory(row: Any) -> Dict[str, Any]:
@@ -394,6 +478,7 @@ def _serialize_memory(row: Any) -> Dict[str, Any]:
         "user_id": payload.get("user_id"),
         "agent_id": payload.get("agent_id"),
         "run_id": payload.get("run_id"),
+        "app_id": payload.get("app_id"),
         "hash": payload.get("hash"),
         "expiration_date": payload.get("expiration_date"),
         "metadata": {k: v for k, v in payload.items() if k not in _RESERVED_PAYLOAD_KEYS},
@@ -414,6 +499,7 @@ def get_all_memories(
     user_id: Optional[str] = None,
     run_id: Optional[str] = None,
     agent_id: Optional[str] = None,
+    app_id: Optional[str] = None,
     top_k: Optional[int] = Query(None, ge=0, le=ALL_MEMORIES_LIMIT),
     show_expired: bool = Query(False),
     _auth=Depends(verify_auth),
@@ -427,7 +513,9 @@ def get_all_memories(
             # Admin all-memory listing is intentionally raw; scoped get_all below applies expiry visibility.
             return _list_all_memories(limit=top_k if top_k is not None else ALL_MEMORIES_LIMIT)
         filters = {
-            k: v for k, v in {"user_id": user_id, "run_id": run_id, "agent_id": agent_id}.items() if v
+            k: v
+            for k, v in {"user_id": user_id, "run_id": run_id, "agent_id": agent_id, "app_id": app_id}.items()
+            if v
         }
         params = {"filters": filters}
         if top_k is not None:
@@ -450,7 +538,7 @@ def get_memory(memory_id: str, _auth=Depends(verify_auth)):
 
 
 @app.post("/search", summary="Search memories")
-def search_memories(search_req: SearchRequest, _auth=Depends(verify_auth)):
+def search_memories(search_req: SearchRequest, request: Request, _auth=Depends(verify_auth)):
     """Search for memories based on a query."""
     try:
         filters = search_req.filters or {}
@@ -466,6 +554,11 @@ def search_memories(search_req: SearchRequest, _auth=Depends(verify_auth)):
                 ", ".join(deprecated_keys),
                 ", ".join(f'"{k}": "..."' for k in deprecated_keys),
             )
+        _capture_request_log(
+            request,
+            payload=search_req.model_dump(exclude_none=True),
+            entities={key: filters.get(key) for key in LOGGED_ENTITY_KEYS},
+        )
         params = {}
         if search_req.top_k is not None:
             params["top_k"] = search_req.top_k
@@ -475,7 +568,9 @@ def search_memories(search_req: SearchRequest, _auth=Depends(verify_auth)):
             params["explain"] = search_req.explain
         if search_req.show_expired is not None:
             params["show_expired"] = search_req.show_expired
-        return get_memory_instance().search(query=search_req.query, filters=filters, **params)
+        result = get_memory_instance().search(query=search_req.query, filters=filters, **params)
+        _capture_request_log(request, response=result)
+        return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
@@ -485,7 +580,7 @@ def search_memories(search_req: SearchRequest, _auth=Depends(verify_auth)):
 
 
 @app.put("/memories/{memory_id}", summary="Update a memory")
-def update_memory(memory_id: str, updated_memory: MemoryUpdate, _auth=Depends(verify_auth)):
+def update_memory(memory_id: str, updated_memory: MemoryUpdate, request: Request, _auth=Depends(verify_auth)):
     """Update an existing memory."""
     try:
         fields_set = getattr(updated_memory, "model_fields_set", getattr(updated_memory, "__fields_set__", set()))
@@ -496,7 +591,10 @@ def update_memory(memory_id: str, updated_memory: MemoryUpdate, _auth=Depends(ve
             params["metadata"] = updated_memory.metadata
         if "expiration_date" in fields_set:
             params["expiration_date"] = updated_memory.expiration_date
-        return get_memory_instance().update(**params)
+        _capture_request_log(request, payload={"memory_id": memory_id, **updated_memory.model_dump(exclude_none=True)})
+        result = get_memory_instance().update(**params)
+        _capture_request_log(request, response=result)
+        return result
     except (ValueError, Mem0ValidationError) as e:
         raise _client_error(e)
     except Exception:
@@ -513,10 +611,12 @@ def memory_history(memory_id: str, _auth=Depends(verify_auth)):
 
 
 @app.delete("/memories/{memory_id}", summary="Delete a memory", response_model=MessageResponse)
-def delete_memory(memory_id: str, _auth=Depends(verify_auth)):
+def delete_memory(memory_id: str, request: Request, _auth=Depends(verify_auth)):
     """Delete a specific memory by ID."""
     try:
+        _capture_request_log(request, payload={"memory_id": memory_id})
         get_memory_instance().delete(memory_id=memory_id)
+        _capture_request_log(request, response={"memory_id": memory_id, "event": "DELETE"})
         return MessageResponse(message="Memory deleted successfully")
     except (ValueError, Mem0ValidationError) as e:
         raise _client_error(e)
@@ -526,19 +626,25 @@ def delete_memory(memory_id: str, _auth=Depends(verify_auth)):
 
 @app.delete("/memories", summary="Delete all memories", response_model=MessageResponse)
 def delete_all_memories(
+    request: Request,
     user_id: Optional[str] = None,
     run_id: Optional[str] = None,
     agent_id: Optional[str] = None,
+    app_id: Optional[str] = None,
     _auth=Depends(require_admin),
 ):
     """Delete all memories for a given identifier. Requires admin role."""
-    if not any([user_id, run_id, agent_id]):
+    if not any([user_id, run_id, agent_id, app_id]):
         raise HTTPException(status_code=400, detail="At least one identifier is required.")
     try:
         params = {
-            k: v for k, v in {"user_id": user_id, "run_id": run_id, "agent_id": agent_id}.items() if v
+            k: v
+            for k, v in {"user_id": user_id, "run_id": run_id, "agent_id": agent_id, "app_id": app_id}.items()
+            if v
         }
+        _capture_request_log(request, payload=params, entities=params)
         get_memory_instance().delete_all(**params)
+        _capture_request_log(request, response={"event": "DELETE_ALL", **params})
         return MessageResponse(message="All relevant memories deleted")
     except Exception:
         raise upstream_error()

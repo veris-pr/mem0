@@ -1,8 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
-import type MemoryClient from "mem0ai";
 import type { Scope, ScopeContext, Mem0Config } from "../types.ts";
+import type { MemoryClientLike } from "./client.ts";
 import { DEFAULT_CUSTOM_CATEGORIES } from "../types.ts";
 import { resolveSearchFilters, resolveAddParams } from "./scoping.ts";
 import { formatMemoryList } from "./formatting.ts";
@@ -42,10 +42,11 @@ interface ToolParams {
   content?: string;
   memory_id?: string;
   scope?: Scope;
+  metadata?: Record<string, string>;
 }
 
 export function buildToolExecute(
-  mem0: MemoryClient,
+  mem0: MemoryClientLike,
   scopeCtx: ScopeContext,
   defaultScope: Scope,
 ) {
@@ -56,7 +57,9 @@ export function buildToolExecute(
       case "search": {
         if (signal?.aborted) throw new Error("Cancelled");
         if (!params.query) throw new Error("query is required for search");
-        const filters = resolveSearchFilters(scope, scopeCtx);
+        // Merge agent-supplied category tags into the filters so search narrows to
+        // memories whose metadata matches every provided key/value (exact match).
+        const filters = { ...resolveSearchFilters(scope, scopeCtx), ...(params.metadata ?? {}) };
         const result = await mem0.search(params.query, { filters });
         const memories = result.results ?? [];
         return {
@@ -69,9 +72,14 @@ export function buildToolExecute(
         if (signal?.aborted) throw new Error("Cancelled");
         if (!params.content) throw new Error("content is required for add");
         const addParams = resolveAddParams(scope, scopeCtx);
+        const hasMetadata = params.metadata && Object.keys(params.metadata).length > 0;
         const result = await mem0.add(
           [{ role: "user", content: params.content }],
-          { ...addParams, customCategories: DEFAULT_CUSTOM_CATEGORIES },
+          {
+            ...addParams,
+            ...(hasMetadata ? { metadata: params.metadata } : {}),
+            customCategories: DEFAULT_CUSTOM_CATEGORIES,
+          },
         );
         const res = result as MemoryResult;
         const msg = res.message ?? "Memory stored.";
@@ -129,7 +137,7 @@ export function buildToolExecute(
 
 export function registerMemoryTool(
   pi: ExtensionAPI,
-  mem0: MemoryClient,
+  mem0: MemoryClientLike,
   config: Mem0Config,
   getScopeCtx: () => ScopeContext,
   telemetryCtx?: { apiKey?: string },
@@ -144,6 +152,8 @@ export function registerMemoryTool(
       'Use mem0_memory with action "search" proactively whenever the request may depend on the user\'s past work, preferences, decisions, or environment -- not only when they explicitly mention the past',
       'For multi-part or comparative questions, run several searches with different phrasings and combine the results before answering -- one search is rarely enough',
       'Use mem0_memory with action "add" to save important facts, preferences, goals, decisions, or lessons the user shares',
+      'When you "add", attach 1-3 concise category tags via "metadata" as key:value pairs you choose (e.g. {"type":"decision","area":"auth"} or {"kind":"bug-fix"}). Keep keys/values short, lowercase, and reuse tags consistently so they are useful for later filtering',
+      'When you "search", pass the same kind of tags in "metadata" to narrow results to memories that match ALL of those key/value pairs (combined with the semantic query)',
       'Use mem0_memory with action "update" to modify an existing memory — requires memory_id and content. Preserves the memory ID',
       "Always use the default project scope unless the user EXPLICITLY asks to search across all projects — only then use scope \"global\"",
       "Do NOT pass scope at all for normal queries — omitting it uses the project default automatically",
@@ -185,6 +195,12 @@ export function registerMemoryTool(
         StringEnum(["project", "session", "global"] as const, {
           description:
             "Where to read/write: \"project\" (default -- this repo), \"session\" (this run only), or \"global\" (across ALL projects; only when the user explicitly wants cross-project recall). Omit for normal queries.",
+        }),
+      ),
+      metadata: Type.Optional(
+        Type.Record(Type.String(), Type.String(), {
+          description:
+            "Category tags as key/value pairs you decide. On \"add\": attached to the memory and shown as [key:val] badges (e.g. {\"type\":\"decision\",\"area\":\"auth\"}). On \"search\": filters to memories whose metadata matches ALL given pairs (exact match). Keep keys/values short and reuse them consistently.",
         }),
       ),
     }),

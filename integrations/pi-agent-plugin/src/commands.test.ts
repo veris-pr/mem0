@@ -51,6 +51,7 @@ function makeCtx(confirmResult = true) {
 
 const defaultConfig: Mem0Config = {
   apiKey: "test-key",
+  host: "",
   userId: "test-user",
   autoCapture: false,
   defaultScope: "project",
@@ -467,24 +468,23 @@ describe("registerCommands", () => {
       );
     });
 
-    it("groups memories by category with a count header", async () => {
+    it("lists memories flat with tags and never an 'uncategorized' header", async () => {
       const ctx = makeCtx();
       mem0.getAll.mockResolvedValue({
         results: [
-          { id: "id-1", memory: "likes tea", categories: ["preferences"] },
-          { id: "id-2", memory: "uses vim", categories: ["technical"] },
+          { id: "id-1", memory: "likes tea", metadata: { category: "preferences" } },
+          { id: "id-2", memory: "uses vim", metadata: { category: "technical" } },
         ],
       });
 
       await pi._invoke("mem0-tour", "", ctx);
 
-      expect(pi.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          customType: "mem0-tour",
-          content: expect.stringContaining("Memory tour"),
-          display: true,
-        }),
-      );
+      const content = (pi.sendMessage as any).mock.calls.at(-1)[0].content as string;
+      expect(content).toContain("Memory tour");
+      expect(content).toContain("likes tea");
+      expect(content).toContain("[category:preferences]");
+      expect(content).not.toMatch(/uncategorized/i);
+      expect(content).not.toMatch(/^###/m);
     });
   });
 

@@ -38,6 +38,29 @@ describe("buildToolExecute", () => {
     expect(call[1].customCategories.length).toBe(10);
   });
 
+  it("add attaches agent-chosen metadata tags", async () => {
+    mockMem0.add.mockResolvedValue([{ id: "new-id", memory: "test" }]);
+    await execute({
+      action: "add",
+      content: "Chose immutable source versioning",
+      metadata: { type: "decision", area: "questionnaire" },
+    });
+    const call = mockMem0.add.mock.calls.at(-1);
+    expect(call[1].metadata).toEqual({ type: "decision", area: "questionnaire" });
+  });
+
+  it("search merges metadata tags into the filters", async () => {
+    mockMem0.search.mockResolvedValue({ results: [] });
+    await execute({
+      action: "search",
+      query: "questionnaire",
+      metadata: { type: "decision" },
+    });
+    expect(mockMem0.search).toHaveBeenLastCalledWith("questionnaire", {
+      filters: { user_id: "testuser", app_id: "testproject", type: "decision" },
+    });
+  });
+
   it("search with scope=global filters by user_id with app_id wildcard", async () => {
     mockMem0.search.mockResolvedValue({ results: [] });
     await execute({ action: "search", query: "preferences", scope: "global" });

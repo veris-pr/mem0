@@ -25,6 +25,7 @@ export const API_KEY_ENDPOINTS = {
 
 export const REQUEST_ENDPOINTS = {
   BASE: "/requests",
+  BY_ID: (requestId: string) => `/requests/${requestId}`,
 } as const;
 
 export const ENTITY_ENDPOINTS = {

@@ -1,15 +1,22 @@
 "use client";
 
-import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { DataTable } from "@/components/shared/data-table";
 import { TableSkeleton } from "@/components/shared/table-skeleton";
 import { EmptyState } from "@/components/self-hosted/empty-state";
+import { MemoryDetail } from "@/components/shared/memory-detail";
 import DeleteConfirmationModal from "@/components/ui/delete-confirmation-modal";
 import {
   Sheet,
@@ -24,14 +31,44 @@ import { getErrorMessage } from "@/lib/error-message";
 import { api } from "@/utils/api";
 import { MEMORY_ENDPOINTS } from "@/utils/api-endpoints";
 import { useApiQuery } from "@/hooks/use-api-query";
-import { Memory } from "@/types/api";
+import { EntityType, Memory } from "@/types/api";
 
 const PAGE_SIZE = 20;
 // Keep in sync with ALL_MEMORIES_LIMIT in server/main.py.
 const MEMORY_FETCH_LIMIT = 1000;
 
+const ENTITY_FILTERS: { type: EntityType; label: string; param: string }[] = [
+  { type: "user", label: "User", param: "user_id" },
+  { type: "agent", label: "Agent", param: "agent_id" },
+  { type: "run", label: "Run", param: "run_id" },
+  { type: "app", label: "App", param: "app_id" },
+];
+
+const paramForType = (type: EntityType): string =>
+  ENTITY_FILTERS.find((f) => f.type === type)?.param ?? "user_id";
+
+// Read ?type=&id= (set when navigating here from the Entities page) so the list
+// opens pre-filtered to the chosen entity.
+const initialFilterFromUrl = (): { type: EntityType; id: string } => {
+  if (typeof window === "undefined") return { type: "user", id: "" };
+  const params = new URLSearchParams(window.location.search);
+  const type = params.get("type") as EntityType | null;
+  const valid = ENTITY_FILTERS.some((f) => f.type === type);
+  return {
+    type: valid && type ? type : "user",
+    id: params.get("id") ?? "",
+  };
+};
+
 export default function MemoriesPage() {
-  const [userId, setUserId] = useState("");
+  const initial = initialFilterFromUrl();
+  // Draft filter bound to the controls; `applied` is what the fetch actually uses.
+  const [entityType, setEntityType] = useState<EntityType>(initial.type);
+  const [entityId, setEntityId] = useState(initial.id);
+  const [applied, setApplied] = useState<{ type: EntityType; id: string }>({
+    type: initial.type,
+    id: initial.id,
+  });
   const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null);
   const [memoryToDelete, setMemoryToDelete] = useState<Memory | null>(null);
   const [page, setPage] = useState(0);
@@ -43,15 +80,40 @@ export default function MemoriesPage() {
     refetch,
   } = useApiQuery<Memory[]>(
     async () => {
-      const params = userId.trim()
-        ? { user_id: userId.trim(), top_k: MEMORY_FETCH_LIMIT }
-        : { top_k: MEMORY_FETCH_LIMIT };
+      const params: Record<string, string | number> = {
+        top_k: MEMORY_FETCH_LIMIT,
+      };
+      if (applied.id.trim()) {
+        params[paramForType(applied.type)] = applied.id.trim();
+      }
       const res = await api.get(MEMORY_ENDPOINTS.BASE, { params });
       const raw = res.data?.results ?? res.data ?? [];
       return Array.isArray(raw) ? raw : [];
     },
     { errorToast: "Failed to load memories", initialData: [] },
   );
+
+  // useApiQuery already fetches on mount; only refetch when the committed filter changes.
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    void refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applied]);
+
+  const applyFilter = () => {
+    setPage(0);
+    setApplied({ type: entityType, id: entityId });
+  };
+
+  const clearFilter = () => {
+    setEntityId("");
+    setPage(0);
+    setApplied({ type: entityType, id: "" });
+  };
 
   const totalPages = Math.ceil(memories.length / PAGE_SIZE);
   const paginatedMemories = memories.slice(
@@ -87,6 +149,7 @@ export default function MemoriesPage() {
     },
     { key: "user_id" as keyof Memory, label: "User", width: 100 },
     { key: "agent_id" as keyof Memory, label: "Agent", width: 100 },
+    { key: "app_id" as keyof Memory, label: "App", width: 100 },
     {
       key: "created_at" as keyof Memory,
       label: "Created",
@@ -110,19 +173,39 @@ export default function MemoriesPage() {
         />
       )}
 
-      <div className="flex gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Select
+          value={entityType}
+          onValueChange={(value) => setEntityType(value as EntityType)}
+        >
+          <SelectTrigger className="w-32">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ENTITY_FILTERS.map((f) => (
+              <SelectItem key={f.type} value={f.type}>
+                {f.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Input
-          placeholder="Filter by User ID (optional)"
-          value={userId}
-          onChange={(e) => setUserId(e.target.value)}
+          placeholder="Filter by entity ID (optional)"
+          value={entityId}
+          onChange={(e) => setEntityId(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              setPage(0);
-              refetch();
-            }
+            if (e.key === "Enter") applyFilter();
           }}
           className="w-64"
         />
+        <Button variant="outline" onClick={applyFilter} disabled={isLoading}>
+          Filter
+        </Button>
+        {entityId.trim() && (
+          <Button variant="ghost" size="icon" onClick={clearFilter}>
+            <X className="size-4" />
+          </Button>
+        )}
       </div>
 
       {isLoading ? (
@@ -198,67 +281,18 @@ export default function MemoriesPage() {
           if (!open) setSelectedMemory(null);
         }}
       >
-        <SheetContent className="sm:max-w-md">
+        <SheetContent className="sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>Memory Detail</SheetTitle>
             <SheetDescription className="sr-only">
-              View memory content and metadata
+              View memory content, metadata, entities, and update history
             </SheetDescription>
           </SheetHeader>
           {selectedMemory && (
-            <div className="mt-6 space-y-4">
-              <div className="space-y-1">
-                <Label className="text-xs text-onSurface-default-tertiary">
-                  Content
-                </Label>
-                <p className="text-sm">{selectedMemory.memory}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Label className="text-xs text-onSurface-default-tertiary">
-                    ID
-                  </Label>
-                  <p className="text-xs font-mono break-all">
-                    {selectedMemory.id}
-                  </p>
-                </div>
-                {selectedMemory.user_id && (
-                  <div className="space-y-1">
-                    <Label className="text-xs text-onSurface-default-tertiary">
-                      User
-                    </Label>
-                    <p className="text-sm">{selectedMemory.user_id}</p>
-                  </div>
-                )}
-                {selectedMemory.agent_id && (
-                  <div className="space-y-1">
-                    <Label className="text-xs text-onSurface-default-tertiary">
-                      Agent
-                    </Label>
-                    <p className="text-sm">{selectedMemory.agent_id}</p>
-                  </div>
-                )}
-                {selectedMemory.created_at && (
-                  <div className="space-y-1">
-                    <Label className="text-xs text-onSurface-default-tertiary">
-                      Created
-                    </Label>
-                    <p className="text-sm">
-                      {new Date(selectedMemory.created_at).toLocaleString()}
-                    </p>
-                  </div>
-                )}
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-onSurface-danger-primary"
-                onClick={() => setMemoryToDelete(selectedMemory)}
-              >
-                <Trash2 className="size-3.5 mr-1" />
-                Delete memory
-              </Button>
-            </div>
+            <MemoryDetail
+              memory={selectedMemory}
+              onDelete={() => setMemoryToDelete(selectedMemory)}
+            />
           )}
         </SheetContent>
       </Sheet>

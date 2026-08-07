@@ -10,6 +10,7 @@ export interface DreamConfig {
 
 export interface Mem0Config {
   apiKey: string;
+  host: string;
   userId: string;
   autoCapture: boolean;
   defaultScope: Scope;

@@ -3,7 +3,7 @@ title: Pi Agent
 description: "Add persistent memory to Pi Agent with the Mem0 plugin semantic search, auto-capture, and dream consolidation."
 ---
 
-Add persistent memory to [**Pi Agent**](https://pi.dev) with `@mem0/pi-agent-plugin`. Your agent forgets everything between sessions. This plugin fixes that by automatically capturing knowledge from conversations, storing it in Mem0's cloud memory layer, and retrieving relevant context before every response.
+Add persistent memory to [**Pi Agent**](https://pi.dev) with `@mem0/pi-agent-plugin`. Your agent forgets everything between sessions. This plugin fixes that by automatically capturing knowledge from conversations, storing it in Mem0 Cloud or a self-hosted Mem0 server, and retrieving relevant context before every response.
 
 ## Overview
 
@@ -17,13 +17,15 @@ The plugin provides:
 
 ## Prerequisites
 
-1. A Mem0 Platform account and API key:
-   - <a href="https://app.mem0.ai?utm_source=oss&utm_medium=integration-pi-agent" rel="nofollow">Sign up at app.mem0.ai</a>
-   - <a href="https://app.mem0.ai/dashboard/api-keys?utm_source=oss&utm_medium=integration-pi-agent" rel="nofollow">Get your API key</a> (starts with `m0-`)
+1. One Mem0 deployment:
+   - **Mem0 Cloud:** <a href="https://app.mem0.ai?utm_source=oss&utm_medium=integration-pi-agent" rel="nofollow">Sign up at app.mem0.ai</a> and <a href="https://app.mem0.ai/dashboard/api-keys?utm_source=oss&utm_medium=integration-pi-agent" rel="nofollow">get your API key</a> (starts with `m0-`).
+   - **Self-hosted Mem0:** Start the [REST API server](/open-source/features/rest-api) and note its origin, such as `http://localhost:8888`.
 
 2. Pi Agent installed ([pi.dev](https://pi.dev))
 
-3. Your API key added to your shell profile:
+3. Connection config added to your shell profile.
+
+For Mem0 Cloud:
 
 <CodeGroup>
 ```bash zsh
@@ -37,13 +39,28 @@ source ~/.bashrc
 ```
 </CodeGroup>
 
+For self-hosted Mem0 with `AUTH_DISABLED=true`, set only the server origin:
+
+```bash
+export MEM0_HOST="http://localhost:8888"
+```
+
+For self-hosted Mem0 with auth enabled, also set the API key created by that server. The plugin sends it as `X-API-Key`:
+
+```bash
+export MEM0_HOST="https://memory.example.com"
+export MEM0_API_KEY="m0sk-your-self-hosted-key"
+```
+
+`MEM0_HOST` must be an origin. Do not append `/memories`, `/search`, or a versioned API path.
+
 ## Installation
 
 ```bash
 pi install npm:@mem0/pi-agent-plugin
 ```
 
-That's it. The extension loads automatically on every Pi session. No config files needed: `MEM0_API_KEY` from your environment is picked up automatically.
+That's it. The extension loads automatically on every Pi session. No config file is needed: it reads `MEM0_API_KEY`, `MEM0_HOST`, and `MEM0_USER_ID` from the environment.
 
 <Info>
   Start a new Pi session and run `/mem0-status` to verify the connection. You should see your user ID, detected project, and memory count.
@@ -56,6 +73,7 @@ For advanced settings, create `~/.pi/agent/mem0-config.json`:
 ```json
 {
   "apiKey": "m0-your-key-here",
+  "host": "",
   "userId": "your-username",
   "autoCapture": true,
   "defaultScope": "project",
@@ -72,7 +90,8 @@ For advanced settings, create `~/.pi/agent/mem0-config.json`:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `apiKey` | `string` | `$MEM0_API_KEY` | Mem0 API key. Environment variable takes precedence. |
+| `apiKey` | `string` | `$MEM0_API_KEY` | Mem0 Cloud API key or self-hosted API key. Optional only when self-hosted auth is disabled. |
+| `host` | `string` | `$MEM0_HOST` or `""` | Self-hosted Mem0 origin. Empty selects Mem0 Cloud. |
 | `userId` | `string` | `$MEM0_USER_ID` or `"default"` | User identity for memory scoping |
 | `autoCapture` | `boolean` | `true` | Store facts from conversations automatically |
 | `defaultScope` | `string` | `"project"` | Default memory scope: `project`, `session`, or `global` |
@@ -168,7 +187,8 @@ You: What do you know about my preferences?
 
 ## Troubleshooting
 
-- **"No API key found"**: Verify `MEM0_API_KEY` is set: `echo $MEM0_API_KEY`. If empty, add it to your shell profile (see Prerequisites)
+- **"No connection configured"**: Set `MEM0_API_KEY` for Mem0 Cloud or `MEM0_HOST` for self-hosted Mem0.
+- **Self-hosted `401` response**: Set `MEM0_API_KEY` to a key issued by the self-hosted server. The plugin sends it through `X-API-Key`.
 - **Extension not loading**: Check Pi startup output for errors. Run `pi -e ./src/entry.ts` from the plugin directory for verbose output
 - **Memories not capturing**: Verify `autoCapture` is `true` (default). Check `/mem0-status` for connection health
 - **Wrong project detected**: The plugin uses the git repository root as `app_id`. If not in a git repo, it falls back to the working directory name. Run `/mem0-status` to see the detected project

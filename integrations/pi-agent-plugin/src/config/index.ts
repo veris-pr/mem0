@@ -17,6 +17,7 @@ const DEFAULT_DREAM: DreamConfig = {
 
 const DEFAULT_CONFIG: Mem0Config = {
   apiKey: "",
+  host: "",
   userId: "",
   autoCapture: true,
   defaultScope: "project",
@@ -50,6 +51,9 @@ export function loadConfig(): Mem0Config {
 
   if (process.env.MEM0_API_KEY) {
     config.apiKey = process.env.MEM0_API_KEY;
+  }
+  if (process.env.MEM0_HOST) {
+    config.host = process.env.MEM0_HOST;
   }
   if (process.env.MEM0_USER_ID) {
     config.userId = process.env.MEM0_USER_ID;

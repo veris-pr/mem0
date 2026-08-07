@@ -25,7 +25,7 @@ No memories found. Nothing to consolidate.
 
 Work entirely in-memory; do not modify anything yet.
 
-Group memories by category. For each group, identify the following:
+Consider all memories together. (There is no fixed category field to bucket by — memories carry only the `key:value` tags the agent chose, and many have none. If most memories share a tag key, you MAY use it to limit comparisons; otherwise compare across the whole set.) Identify the following:
 
 ### 2a. Near-duplicate pairs (merge candidates)
 
@@ -33,7 +33,7 @@ Two memories are near-duplicates when they express the same fact but phrased dif
 
 Heuristics — two memories are near-duplicates if **all** of these hold:
 - If >60% of significant nouns/keywords overlap, treat as near-duplicate.
-- Same category.
+- Their tags don't conflict (no differing values for the same key).
 - Neither memory is pinned (content does not start with `[PINNED]`).
 
 For each qualifying pair, draft a merged version that is more complete than either original.
@@ -94,7 +94,7 @@ If the user declines, print `Cancelled. No changes made.` and stop.
 
 If confirmed, apply all changes:
 
-**Merges:** Delete both originals, add the merged version using `mem0_memory` with `action="add"`.
+**Merges:** Delete both originals, add the merged version using `mem0_memory` with `action="add"`. Carry over the originals' `key:value` tags via `metadata` so the merged memory keeps its category badges (if the two disagree on a key, keep the more recent memory's value).
 
 **Contradictions (resolved):** Delete the loser using `mem0_memory` with `action="delete"`.
 
